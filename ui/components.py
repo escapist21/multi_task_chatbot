@@ -27,7 +27,7 @@ def build_app() -> gr.Blocks:
                     choices=list(TASK_CONFIG.keys()),
                     label="Task",
                     info="Choose the primary task for the assistant.",
-                    value="Question Answering",
+                    value="Generic Assistant",
                 )
 
                 gr.Markdown("### 2. Enable Tools")

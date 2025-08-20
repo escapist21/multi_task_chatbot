@@ -27,11 +27,11 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Define task configurations with model, temperature, etc.
 TASK_CONFIG = {
+    "Generic Assistant": {"model": "gpt-4.1-mini", "temperature": 0.0},
+    "Document Question Answering": {"model": "gpt-4.1", "temperature": 0.0},
+    "Summarisation": {"model": "gpt-4.1-mini", "temperature": 0.0},
+    "Translation": {"model": "gpt-4.1-mini", "temperature": 0.0},
     "Text Classification": {"model": "gpt-4.1-mini", "temperature": 0.0},
-    "Question Answering": {"model": "gpt-4.1-mini", "temperature": 0.0},
     "Table Question Answering": {"model": "gpt-4.1", "temperature": 0.0},
     "Sentence Similarity": {"model": "gpt-4.1-mini", "temperature": 0.0},
-    "Translation": {"model": "gpt-4.1-mini", "temperature": 0.0},
-    "Summarisation": {"model": "gpt-4.1-mini", "temperature": 0.0},
-    "Document Question Answering": {"model": "gpt-4.1", "temperature": 0.0},
 }
