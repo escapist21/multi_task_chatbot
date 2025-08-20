@@ -12,7 +12,7 @@ def build_app() -> gr.Blocks:
     """Build and return the Gradio Blocks app."""
     with gr.Blocks() as demo:
         gr.Markdown("# Multi-Task Chatbot with Web & File Search")
-        gr.Markdown("Powered by OpenAI Assistants API")
+        gr.Markdown("Powered by OpenAI API")
 
         with gr.Row():
             # --- Left Column (Chat Interface) ---
