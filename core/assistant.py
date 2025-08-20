@@ -151,15 +151,16 @@ def chat_fn_streaming(
 
     # Add the user's message and prime the assistant reply in history
     try:
-        client.beta.threads.messages.create(
+        settings.client.beta.threads.messages.create(
             thread_id=state.thread_id,
             role="user",
             content=message,
         )
     except Exception as e:
         print(f"Error adding message to thread: {e}")
-        history.append((message, f"Error: Could not process your message. {e}"))
-        yield "", history
+        msgs = messages_append_user(list(history_messages or []), message)
+        msgs = messages_append_assistant(msgs, f"Error: Could not process your message. {e}")
+        yield "", msgs
         return
 
     # Prepare a working copy of history with a placeholder assistant reply
