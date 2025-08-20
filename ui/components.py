@@ -1,4 +1,5 @@
 from __future__ import annotations
+from re import T
 
 import gradio as gr
 
@@ -18,7 +19,8 @@ def build_app() -> gr.Blocks:
         with gr.Row():
             # --- Left Column (Chat Interface) ---
             with gr.Column(scale=3):
-                chatbot = gr.Chatbot(label="Conversation", height=600, type="messages")
+                chatbot = gr.Chatbot(label="Conversation", height=600, type="messages", 
+                show_copy_button=True, show_copy_all_button=True)
                 user_input = gr.Textbox(placeholder="Type your message...", lines=1, label="", scale=10)
 
             # --- Controls Left: API Key + Configure Task ---
