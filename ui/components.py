@@ -3,6 +3,7 @@ from __future__ import annotations
 import gradio as gr
 
 from config.settings import TASK_CONFIG, set_openai_api_key
+import config.settings as settings
 from core.assistant import chat_entry
 from core.file_handler import upload_files
 from core.state import reset_session
@@ -69,6 +70,13 @@ def build_app() -> gr.Blocks:
             reset_msg = reset_session()
             return msg, reset_msg
 
+        def on_tools_change(selected_tools: list[str] | None):
+            try:
+                settings.dprint(f"Tools toggled: {selected_tools}")
+            except Exception:
+                pass
+            return reset_session()
+
         user_input.submit(
             fn=chat_entry,
             inputs=[user_input, chatbot, task_select, tool_select, stream_default],
@@ -83,7 +91,7 @@ def build_app() -> gr.Blocks:
         )
 
         task_select.change(fn=reset_session, inputs=None, outputs=[reset_status])
-        tool_select.change(fn=reset_session, inputs=None, outputs=[reset_status])
+        tool_select.change(fn=on_tools_change, inputs=[tool_select], outputs=[reset_status])
         reset_btn.click(fn=reset_session, inputs=None, outputs=[reset_status])
 
         set_key_btn.click(fn=apply_api_key, inputs=[api_key_box], outputs=[api_key_status, reset_status])

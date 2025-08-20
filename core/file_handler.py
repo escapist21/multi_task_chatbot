@@ -8,9 +8,10 @@ import gradio as gr
 from config.settings import client
 from core.state import reset_session
 import os
+from pathlib import Path
 
 
-def upload_files(files: List[os.PathLike] | None) -> Tuple[str, Any, Any]:
+def upload_files(files: List[os.PathLike | str] | None) -> Tuple[str, Any, Any]:
     """Uploads files to OpenAI and adds them to a vector store.
 
     Returns a tuple for Gradio outputs:
@@ -34,25 +35,53 @@ def upload_files(files: List[os.PathLike] | None) -> Tuple[str, Any, Any]:
         vs = client.vector_stores.create(name=f"chatbot_store_{int(time.time())}")
         state.vector_store_id = vs.id
 
-        file_paths = [f.name for f in files]
-        file_streams = [open(path, "rb") for path in file_paths]
+        # Normalize incoming paths from Gradio (may be str or PathLike objects)
+        paths: List[Path] = []
+        for f in files:
+            try:
+                if isinstance(f, (str, bytes, os.PathLike)):
+                    p = Path(f)
+                else:
+                    name_attr = getattr(f, "name", None)
+                    p = Path(name_attr) if isinstance(name_attr, str) else None
+                if p is not None:
+                    paths.append(p)
+            except Exception:
+                continue
 
-        print(f"Uploading {len(file_paths)} files to new Vector Store: {state.vector_store_id}")
+        if not paths:
+            return (
+                "No valid file paths were provided.",
+                gr.update(),
+                gr.update(),
+            )
 
-        # Upload and poll
-        file_batch = client.vector_stores.file_batches.upload_and_poll(
-            vector_store_id=state.vector_store_id, files=file_streams
-        )
+        # Open files and ensure they are always closed
+        file_streams = []
+        try:
+            for p in paths:
+                file_streams.append(open(str(p), "rb"))
 
-        # Close file streams
-        for stream in file_streams:
-            stream.close()
+            print(
+                f"Uploading {len(paths)} files to new Vector Store: {state.vector_store_id}"
+            )
+
+            # Upload and poll
+            file_batch = client.vector_stores.file_batches.upload_and_poll(
+                vector_store_id=state.vector_store_id, files=file_streams
+            )
+        finally:
+            for stream in file_streams:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
         # Reset current assistant to force recreation with new vector store
         reset_session()
 
         return (
-            f"Uploaded {len(files)} files. Vector Store Status: {file_batch.status}",
+            f"Uploaded {len(paths)} files. Vector Store Status: {file_batch.status}",
             ["File Search"],
             "Chat with Document",
         )
