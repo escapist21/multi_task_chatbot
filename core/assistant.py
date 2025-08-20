@@ -4,74 +4,25 @@ from typing import Any, Iterator, List, Tuple
 
 from openai.types.beta.assistant_create_params import ToolResources
 
-from config.settings import client, TASK_CONFIG
+from config.settings import client, TASK_CONFIG, DEBUG, dprint
 from config.prompts import SYS_PROMPTS
 from core import state
 from core.responses_chat import responses_stream_chat
+from utils.chat_format import (
+    messages_append_user,
+    messages_append_assistant,
+    ensure_last_assistant_message,
+    append_to_last_assistant,
+    extract_text_blocks_from_assistant,
+    sanitize_messages,
+)
 
 
-def _messages_to_pairs(messages: List[Any]) -> List[Tuple[str, str]]:
-    """Convert Gradio Chatbot messages-format to list of (user, assistant) pairs.
-
-    Expects a list of dicts like {"role": "user"|"assistant", "content": str}.
-    Tolerates missing assistant replies by pairing with "".
-    """
-    pairs: List[Tuple[str, str]] = []
-    pending_user: str | None = None
-    for m in messages or []:
-        if not isinstance(m, dict):
-            continue
-        role = m.get("role")
-        content = m.get("content")
-        # content may be a list (rich); join text if needed
-        if isinstance(content, list):
-            # try to extract plain text parts
-            text_parts: List[str] = []
-            for c in content:
-                if isinstance(c, dict):
-                    val = c.get("text") or c.get("content") or c.get("value")
-                    if isinstance(val, str):
-                        text_parts.append(val)
-            content = "".join(text_parts) if text_parts else ""
-        if not isinstance(content, str):
-            content = str(content) if content is not None else ""
-
-        if role == "user":
-            if pending_user is not None:
-                # previous user without assistant, close it with empty assistant
-                pairs.append((pending_user, ""))
-            pending_user = content
-        elif role == "assistant":
-            if pending_user is None:
-                # unexpected assistant-first; treat as empty user
-                pairs.append(("", content))
-            else:
-                pairs.append((pending_user, content))
-                pending_user = None
-        else:
-            # ignore other roles for pairing
-            continue
-    if pending_user is not None:
-        pairs.append((pending_user, ""))
-    return pairs
-
-
-def _pairs_to_messages(pairs: List[Tuple[str, str]]) -> List[dict]:
-    """Convert (user, assistant) pairs to Gradio Chatbot messages-format list of dicts."""
-    msgs: List[dict] = []
-    for u, a in pairs:
-        if u is not None:
-            msgs.append({"role": "user", "content": u})
-        if a is not None and a != "":
-            msgs.append({"role": "assistant", "content": a})
-    return msgs
-
-
-def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history: List[Tuple[str, str]], message: str) -> tuple[bool, List[Tuple[str, str]]]:
-    """Ensure assistant and thread exist. Returns (ok, history)."""
+def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_messages: List[dict], message: str) -> tuple[bool, List[dict]]:
+    """Ensure assistant and thread exist. Returns (ok, messages)."""
     # --- 1. Create or Update Assistant ---
     if not state.assistant_id:
-        print("No assistant found. Creating a new one...")
+        dprint("No assistant found. Creating a new one...")
         instructions = SYS_PROMPTS.get(task, "You are a helpful assistant.")
         cfg = TASK_CONFIG.get(task, {"model": "gpt-4o-mini"})
 
@@ -97,34 +48,36 @@ def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history: L
                 tool_resources=tool_resources,
             )
             state.assistant_id = assistant.id
-            print(
+            dprint(
                 f"Created new Assistant (ID: {state.assistant_id}) for task '{task}' with tools: {enabled_tools}"
             )
         except Exception as e:
             print(f"Error creating assistant: {e}")
-            history.append((message, f"Error: Could not create the assistant. {e}"))
-            return False, history
+            msgs = messages_append_user(list(history_messages or []), message)
+            msgs = messages_append_assistant(msgs, f"Error: Could not create the assistant. {e}")
+            return False, msgs
 
     # --- 2. Create a Thread ---
     if not state.thread_id:
-        print("No thread found. Creating a new one...")
+        dprint("No thread found. Creating a new one...")
         try:
             thread = client.beta.threads.create()
             state.thread_id = thread.id
-            print(f"Created new Thread (ID: {state.thread_id})")
+            dprint(f"Created new Thread (ID: {state.thread_id})")
         except Exception as e:
             print(f"Error creating thread: {e}")
-            history.append((message, f"Error: Could not create the conversation thread. {e}"))
-            return False, history
+            msgs = messages_append_user(list(history_messages or []), message)
+            msgs = messages_append_assistant(msgs, f"Error: Could not create the conversation thread. {e}")
+            return False, msgs
 
-    return True, history
+    return True, history_messages
 
 
-def chat_fn(message: str, history: List[Tuple[str, str]], task: str, enabled_tools: List[str]) -> tuple[str, List[Tuple[str, str]]]:
-    """Non-streaming chat function that uses the Assistants API and returns once completed."""
-    ok, history = _ensure_assistant_and_thread(task, enabled_tools, history, message)
+def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools: List[str]) -> tuple[str, List[dict]]:
+    """Non-streaming chat (Assistants API); returns messages for Gradio Chatbot(type="messages")."""
+    ok, history_messages = _ensure_assistant_and_thread(task, enabled_tools, history_messages, message)
     if not ok:
-        return "", history
+        return "", history_messages
 
     # --- 3. Add User's Message to the Thread ---
     try:
@@ -135,54 +88,57 @@ def chat_fn(message: str, history: List[Tuple[str, str]], task: str, enabled_too
         )
     except Exception as e:
         print(f"Error adding message to thread: {e}")
-        history.append((message, f"Error: Could not process your message. {e}"))
-        return "", history
+        msgs = messages_append_user(list(history_messages or []), message)
+        msgs = messages_append_assistant(msgs, f"Error: Could not process your message. {e}")
+        return "", msgs
 
     # --- 4. Run the Assistant and Poll for Completion ---
     try:
-        print(f"Running Assistant {state.assistant_id} on Thread {state.thread_id}...")
+        dprint(f"Running Assistant {state.assistant_id} on Thread {state.thread_id}...")
         run = client.beta.threads.runs.create_and_poll(
             thread_id=state.thread_id,
             assistant_id=state.assistant_id,
         )
     except Exception as e:
         print(f"Error during assistant run: {e}")
-        history.append((message, f"Error: The assistant failed to run. {e}"))
-        return "", history
+        msgs = messages_append_user(list(history_messages or []), message)
+        msgs = messages_append_assistant(msgs, f"Error: The assistant failed to run. {e}")
+        return "", msgs
 
     # --- 5. Retrieve and Display the Response ---
     if run.status == "completed":
-        messages = client.beta.threads.messages.list(thread_id=state.thread_id)
-        assistant_message = messages.data[0]
-
-        reply_parts: List[str] = []
-        for content_block in assistant_message.content:
-            if content_block.type == "text":
-                reply_parts.append(content_block.text.value)
-
-        reply = "".join(reply_parts)
-
-        history.append((message, reply))
-        return "", history
+        msgs_list = list(history_messages or [])
+        msgs_list = messages_append_user(msgs_list, message)
+        try:
+            thread_messages = client.beta.threads.messages.list(thread_id=state.thread_id)
+            latest = thread_messages.data[0]
+            final_reply = extract_text_blocks_from_assistant(latest)
+            msgs_list = messages_append_assistant(msgs_list, final_reply)
+        except Exception as e:
+            print(f"Error fetching final message: {e}")
+            msgs_list = messages_append_assistant(msgs_list, "")
+        return "", msgs_list
     else:
-        print(f"Run failed with status: {run.status}")
+        dprint(f"Run failed with status: {run.status}")
         error_message = f"Run failed with status: {run.status}. Please try again."
         if getattr(run, "last_error", None):
             error_message += f" Details: {run.last_error.message}"
-        history.append((message, error_message))
-        return "", history
+        msgs_list = list(history_messages or [])
+        msgs_list = messages_append_user(msgs_list, message)
+        msgs_list = messages_append_assistant(msgs_list, error_message)
+        return "", msgs_list
 
 
 def chat_fn_streaming(
-    message: str, history: List[Tuple[str, str]], task: str, enabled_tools: List[str]
-) -> Iterator[tuple[str, List[Tuple[str, str]]]]:
+    message: str, history_messages: List[dict], task: str, enabled_tools: List[str]
+) -> Iterator[tuple[str, List[dict]]]:
     """Streaming chat function using Assistants API streaming.
 
     Yields progressive updates to the last assistant message in history.
     """
-    ok, history = _ensure_assistant_and_thread(task, enabled_tools, history, message)
+    ok, history_messages = _ensure_assistant_and_thread(task, enabled_tools, history_messages, message)
     if not ok:
-        yield "", history
+        yield "", history_messages
         return
 
     # Add the user's message and prime the assistant reply in history
@@ -199,20 +155,20 @@ def chat_fn_streaming(
         return
 
     # Prepare a working copy of history with a placeholder assistant reply
-    work_history = list(history)
-    work_history.append((message, ""))
+    work_messages = messages_append_user(list(history_messages or []), message)
+    work_messages = ensure_last_assistant_message(work_messages)
 
     # True token-by-token streaming via Assistants API
     try:
-        print(f"Streaming Assistant {state.assistant_id} on Thread {state.thread_id}...")
+        dprint(f"Streaming Assistant {state.assistant_id} on Thread {state.thread_id}...")
         # Emit an immediate placeholder so the UI shows progress
         try:
-            user_msg, current_reply = work_history[-1]
-            if not current_reply:
-                work_history[-1] = (user_msg, "...")
-                yield "", list(work_history)
-                # replace placeholder on first real delta
-                work_history[-1] = (user_msg, "")
+            # Emit placeholder assistant if empty
+            if not (work_messages and work_messages[-1].get("role") == "assistant" and work_messages[-1].get("content")):
+                tmp = list(work_messages)
+                tmp[-1]["content"] = "..."
+                yield "", tmp
+                work_messages[-1]["content"] = ""
         except Exception:
             pass
 
@@ -223,14 +179,14 @@ def chat_fn_streaming(
                 # Some SDKs expose `event.event` instead of `event.type`
                 etype = getattr(event, "type", None) or getattr(event, "event", None)
                 try:
-                    print(f"[assist_stream] event: {etype}")
+                    dprint(f"[assist_stream] event: {etype}")
                     if etype is None:
-                        print(f"[assist_stream] event class: {event.__class__.__name__}")
+                        dprint(f"[assist_stream] event class: {event.__class__.__name__}")
                         # Print a shortened repr to avoid flooding
                         er = repr(event)
                         if len(er) > 300:
                             er = er[:300] + "..."
-                        print(f"[assist_stream] event repr: {er}")
+                        dprint(f"[assist_stream] event repr: {er}")
                 except Exception:
                     pass
 
@@ -297,38 +253,34 @@ def chat_fn_streaming(
                         pass
 
                 if delta_text:
-                    user_msg, current_reply = work_history[-1]
-                    work_history[-1] = (user_msg, current_reply + delta_text)
-                    yield "", list(work_history)
+                    work_messages = append_to_last_assistant(work_messages, delta_text)
+                    yield "", list(work_messages)
 
             # Final run status
             run = stream.get_final_run()
     except Exception as e:
         print(f"Error during streaming: {e}")
-        work_history[-1] = (work_history[-1][0], f"Error: The assistant failed to stream. {e}")
-        yield "", work_history
+        work_messages = append_to_last_assistant(work_messages, f"Error: The assistant failed to stream. {e}")
+        yield "", work_messages
         return
 
     if run.status == "completed":
         # Ensure final text is complete (in case some tokens weren't emitted as deltas)
         try:
-            messages = client.beta.threads.messages.list(thread_id=state.thread_id)
-            assistant_message = messages.data[0]
-            reply_parts: List[str] = []
-            for content_block in assistant_message.content:
-                if content_block.type == "text":
-                    reply_parts.append(content_block.text.value)
-            final_reply = "".join(reply_parts)
-            work_history[-1] = (work_history[-1][0], final_reply)
+            thread_messages = client.beta.threads.messages.list(thread_id=state.thread_id)
+            assistant_message = thread_messages.data[0]
+            final_reply = extract_text_blocks_from_assistant(assistant_message)
+            # Replace last assistant content with final
+            work_messages[-1]["content"] = final_reply
         except Exception as e:
-            print(f"Error fetching final message after stream: {e}")
-        yield "", work_history
+            dprint(f"Error fetching final message after stream: {e}")
+        yield "", work_messages
     else:
         err = f"Run failed with status: {run.status}."
         if getattr(run, "last_error", None):
             err += f" Details: {run.last_error.message}"
-        work_history[-1] = (work_history[-1][0], err)
-        yield "", work_history
+        work_messages = append_to_last_assistant(work_messages, err)
+        yield "", work_messages
 
 
 def chat_entry(
@@ -344,25 +296,20 @@ def chat_entry(
     yields output tuples matching the outputs spec. Returning a generator object
     (instead of yielding) causes a ValueError about output arity.
     """
-    # Normalize incoming history: detect messages-format dicts
-    # Treat empty history as messages-format because UI Chatbot uses type="messages".
-    history_is_messages = (not history) or isinstance(history[0], dict)
-    history_pairs: List[Tuple[str, str]] = _messages_to_pairs(history) if history_is_messages else list(history or [])
+    # Messages-only model: sanitize incoming history for robustness
+    history_messages: List[dict] = sanitize_messages(history)
 
     if stream:
         # If no tools are enabled, use the simpler Responses API streaming path
         if not enabled_tools:
-            for _, out_pairs in responses_stream_chat(message, history_pairs, task):
-                # Always return messages for Chatbot(type="messages")
-                out_msgs = _pairs_to_messages(out_pairs)
-                yield "", out_msgs
+            for _, out_messages in responses_stream_chat(message, history_messages, task):
+                # Already messages for Chatbot(type="messages")
+                yield "", out_messages
             return
-        # Otherwise, use Assistants streaming (supports tools)
-        for _, out_pairs in chat_fn_streaming(message, history_pairs, task, enabled_tools):
-            out_msgs = _pairs_to_messages(out_pairs)
-            yield "", out_msgs
+        # Otherwise, use Assistants streaming (supports tools), messages-based
+        for _, out_messages in chat_fn_streaming(message, history_messages, task, enabled_tools):
+            yield "", out_messages
         return
     # Non-streaming path
-    _, out_pairs = chat_fn(message, history_pairs, task, enabled_tools)
-    out_msgs = _pairs_to_messages(out_pairs)
-    return "", out_msgs
+    _, out_messages = chat_fn(message, history_messages, task, enabled_tools)
+    return "", out_messages

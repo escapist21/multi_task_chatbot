@@ -1,47 +1,47 @@
 from __future__ import annotations
 
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Dict, Any
 
-from config.settings import client, TASK_CONFIG
+from config.settings import client, TASK_CONFIG, DEBUG, dprint
 from config.prompts import SYS_PROMPTS
+from utils.chat_format import (
+    messages_to_openai,
+    messages_append_user,
+    ensure_last_assistant_message,
+    append_to_last_assistant,
+)
 
 
 def responses_stream_chat(
     message: str,
-    history: List[Tuple[str, str]],
+    history_messages: List[Dict[str, Any]],
     task: str,
-) -> Iterator[tuple[str, List[Tuple[str, str]]]]:
-    """Stream tokens using Chat Completions API (no tools).
+) -> Iterator[tuple[str, List[Dict[str, Any]]]]:
+    """Stream tokens using Chat Completions API (no tools), messages-based.
 
-    Yields (textbox_value, history) tuples for Gradio.
+    Returns yields suitable for Gradio Chatbot(type="messages"): ("", messages_list)
     """
     # Prepare system instruction and model
     instructions = SYS_PROMPTS.get(task, "You are a helpful assistant.")
     cfg = TASK_CONFIG.get(task, {"model": "gpt-4o-mini"})
     model = cfg.get("model", "gpt-4o-mini")
 
-    # Working copy: add placeholder assistant turn
-    work_history = list(history)
-    work_history.append((message, ""))
+    # Working copy: add user message and a placeholder assistant
+    work_messages: List[Dict[str, Any]] = messages_append_user(list(history_messages or []), message)
+    work_messages = ensure_last_assistant_message(work_messages)
     # Immediate placeholder so UI shows activity
     try:
-        yield "", list(work_history)
+        yield "", list(work_messages)
     except Exception:
         pass
 
-    # Build chat messages from history
-    messages: list[dict] = [{"role": "system", "content": instructions}]
-    for u, a in history:
-        if u:
-            messages.append({"role": "user", "content": u})
-        if a:
-            messages.append({"role": "assistant", "content": a})
-    messages.append({"role": "user", "content": message})
-
+    # Build OpenAI chat payload
+    oa_messages = messages_to_openai(work_messages, system_instruction=instructions)
     try:
         stream = client.chat.completions.create(
             model=model,
-            messages=messages,
+            # Exclude the placeholder assistant for API call; last element is the assistant placeholder
+            messages=oa_messages[:-1],
             stream=True,
         )
         for chunk in stream:
@@ -52,17 +52,12 @@ def responses_stream_chat(
                 delta_text = ""
             if delta_text:
                 # Debug: log small snippet of delta
-                try:
-                    print(f"[responses_stream] delta({len(delta_text)}): {delta_text[:40]!r}")
-                except Exception:
-                    pass
-                user_msg, current_reply = work_history[-1]
-                work_history[-1] = (user_msg, current_reply + delta_text)
-                yield "", list(work_history)
+                dprint(f"[responses_stream] delta({len(delta_text)}): {delta_text[:40]!r}")
+                work_messages = append_to_last_assistant(work_messages, delta_text)
+                yield "", list(work_messages)
 
-        # Done: nothing else to fetch; chat.completions stream ends with full text accumulated
-        yield "", work_history
+        # Done: nothing else to fetch; accumulated content is in last assistant message
+        yield "", work_messages
     except Exception as e:
-        user_msg, _ = work_history[-1]
-        work_history[-1] = (user_msg, f"Error: Streaming failed. {e}")
-        yield "", work_history
+        work_messages = append_to_last_assistant(work_messages, f"Error: Streaming failed. {e}")
+        yield "", work_messages
