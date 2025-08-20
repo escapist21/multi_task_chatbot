@@ -58,7 +58,12 @@ def build_app() -> gr.Blocks:
             outputs=[user_input, chatbot],
         )
 
-        upload_btn.click(fn=upload_files, inputs=[file_upload], outputs=[upload_status])
+        # On successful upload, auto-enable File Search and switch task to Document QA
+        upload_btn.click(
+            fn=upload_files,
+            inputs=[file_upload],
+            outputs=[upload_status, tool_select, task_select],
+        )
 
         task_select.change(fn=reset_session, inputs=None, outputs=[reset_status])
         tool_select.change(fn=reset_session, inputs=None, outputs=[reset_status])

@@ -1,20 +1,33 @@
 from __future__ import annotations
 
 import time
-from typing import List
+from typing import List, Tuple, Any
+
+import gradio as gr
 
 from config.settings import client
 from core.state import reset_session
 import os
 
 
-def upload_files(files: List[os.PathLike] | None) -> str:
-    """Uploads files to OpenAI and adds them to a vector store."""
+def upload_files(files: List[os.PathLike] | None) -> Tuple[str, Any, Any]:
+    """Uploads files to OpenAI and adds them to a vector store.
+
+    Returns a tuple for Gradio outputs:
+    (upload_status_text, tools_checkbox_value, task_radio_value)
+
+    On success: enables File Search and switches task to Document Question Answering.
+    On no files/error: leaves tool/task unchanged using gr.update().
+    """
     # Use a local import to avoid circular import of state at module import time
     from core import state
 
     if not files:
-        return "No files selected. Please upload at least one file."
+        return (
+            "No files selected. Please upload at least one file.",
+            gr.update(),
+            gr.update(),
+        )
 
     try:
         # Create a vector store
@@ -38,8 +51,16 @@ def upload_files(files: List[os.PathLike] | None) -> str:
         # Reset current assistant to force recreation with new vector store
         reset_session()
 
-        return f"Uploaded {len(files)} files. Vector Store Status: {file_batch.status}"
+        return (
+            f"Uploaded {len(files)} files. Vector Store Status: {file_batch.status}",
+            ["File Search"],
+            "Document Question Answering",
+        )
 
     except Exception as e:
         print(f"Error during file upload: {e}")
-        return f"An error occurred: {e}"
+        return (
+            f"An error occurred: {e}",
+            gr.update(),
+            gr.update(),
+        )
