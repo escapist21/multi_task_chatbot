@@ -10,7 +10,7 @@
 	- Sentence Similarity
 	- Translation
 	- Summarisation
-	- Document Question Answering
+	- Chat with Document
 - Tools
 	- Web Search
 	- File Search
@@ -94,6 +94,8 @@ Both paths yield messages lists compatible with Gradio `Chatbot(type="messages")
 - File Search
   - Upload files in the UI. A vector store is created and attached as tool resources.
   - Assistant is created/updated with `{type: "file_search"}` and `vector_store_ids`.
+  - After a successful upload, the UI automatically enables File Search and switches the Task to "Chat with Document".
+  - Tip: You can manually change the Task at any time using the Task selector in the right panel.
 
 Sessions can be reset from the UI; this recreates assistant and thread and reattaches tools as needed.
 

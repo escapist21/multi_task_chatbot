@@ -54,7 +54,7 @@ def upload_files(files: List[os.PathLike] | None) -> Tuple[str, Any, Any]:
         return (
             f"Uploaded {len(files)} files. Vector Store Status: {file_batch.status}",
             ["File Search"],
-            "Document Question Answering",
+            "Chat with Document",
         )
 
     except Exception as e:
