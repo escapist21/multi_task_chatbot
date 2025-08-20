@@ -20,8 +20,8 @@ def build_app() -> gr.Blocks:
                 chatbot = gr.Chatbot(label="Conversation", height=600, type="messages")
                 user_input = gr.Textbox(placeholder="Type your message...", lines=1, label="", scale=10)
 
-            # --- Right Column (Controls) ---
-            with gr.Column(scale=1):
+            # --- Controls Left: API Key + Configure Task ---
+            with gr.Column(scale=1, min_width=320):
                 gr.Markdown("### 0. API Key")
                 with gr.Column():
                     api_key_box = gr.Textbox(
@@ -40,6 +40,8 @@ def build_app() -> gr.Blocks:
                     value="Generic Assistant",
                 )
 
+            # --- Controls Right: Tools + Upload + Session + Response Options ---
+            with gr.Column(scale=1, min_width=320):
                 gr.Markdown("### 2. Enable Tools")
                 tool_select = gr.CheckboxGroup(
                     choices=["Web Search", "File Search"],
