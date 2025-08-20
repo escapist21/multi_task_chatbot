@@ -2,7 +2,6 @@ from ui.components import build_app
 
 
 def main() -> None:
-    """Backward-compatible entrypoint that launches the modular Gradio app."""
     demo = build_app()
     demo.launch(share=True, debug=True)
 
