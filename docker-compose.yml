@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  chatbot:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: multi-task-chatbot
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PORT=7860
+      - SERVER_NAME=0.0.0.0
+      - DEBUG=${DEBUG-0}
+      - GRADIO_SHARE=0
+    networks:
+      - frontend
+    labels:
+      - "traefik.enable=true"
+      # HTTP router (for traffic from Nginx cache to Traefik's port 80)
+      # This also handles the HTTP-to-HTTPS redirect within Traefik
+      - "traefik.http.routers.chatbot-http.rule=Host(`aichat.sourav.app`) || Host(`www.aichat.sourav.app`)"
+      - "traefik.http.routers.chatbot-http.entrypoints=web"
+      - "traefik.http.routers.chatbot-http.middlewares=traefik-redirect-to-https"
+      # HTTPS router (for traffic from Nginx SSL Passthrough to Traefik's port 443)
+      - "traefik.http.routers.chatbot-https.rule=Host(`aichat.sourav.app`) || Host(`www.aichat.sourav.app`)"
+      - "traefik.http.routers.chatbot-https.entrypoints=websecure"
+      - "traefik.http.routers.chatbot-https.tls=true"
+      - 'traefik.http.routers.portfolio-https.tls.certresolver=cloudfare'
+
+      # Middleware definition for redirect
+      - 'traefik.http.middlewares.traefik-redirect-to-https.redirectscheme.scheme=https'
+      - 'traefik.http.middlewares.traefik-redirect-to-https.redirectscheme.permanent=true'
+
+      # Explicitly define the port
+      - "traefik.http.services.chatbot-https.loadbalancer.server.port=7860"
+    restart: unless-stopped
+
+networks:
+  frontend:
+    external: true
+
