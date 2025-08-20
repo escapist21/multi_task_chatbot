@@ -1,4 +1,5 @@
 import os
+from getpass import getpass
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -19,9 +20,19 @@ def dprint(msg: str) -> None:
 # Make sure your OPENAI_API_KEY is set in your .env file or environment variables
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise ValueError(
-        "OPENAI_API_KEY not found. Please set it in your .env file or as an environment variable."
-    )
+    dprint("OPENAI_API_KEY not found in environment; prompting via getpass.")
+    try:
+        OPENAI_API_KEY = getpass("Enter your OPENAI_API_KEY (input hidden): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        OPENAI_API_KEY = None
+    if not OPENAI_API_KEY:
+        raise ValueError(
+            "OPENAI_API_KEY is required. Set it in your .env, environment, or enter when prompted."
+        )
+
+# Ensure the key is available to other modules in this process
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+dprint("OPENAI_API_KEY set in process environment.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
