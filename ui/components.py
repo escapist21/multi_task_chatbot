@@ -40,7 +40,7 @@ def build_app() -> gr.Blocks:
                     value="Generic Assistant",
                 )
 
-            # --- Controls Right: Tools + Upload + Session + Response Options ---
+            # --- Controls Right: Tools + Upload + Session ---
             with gr.Column(scale=1, min_width=320):
                 gr.Markdown("### 2. Enable Tools")
                 tool_select = gr.CheckboxGroup(
@@ -52,7 +52,7 @@ def build_app() -> gr.Blocks:
 
                 gr.Markdown("### 3. Upload Files (for File Search)")
                 with gr.Column():
-                    file_upload = gr.File(label="Upload documents", file_count="multiple", type="filepath")
+                    file_upload = gr.File(label="Upload documents", file_count="multiple", type="filepath", height=150)
                     upload_btn = gr.Button("Upload to Vector Store")
                     upload_status = gr.Textbox(label="Upload Status", interactive=False)
 
@@ -60,8 +60,8 @@ def build_app() -> gr.Blocks:
                 reset_btn = gr.Button("Reset Session")
                 reset_status = gr.Textbox(label="Session Status", interactive=False)
 
-                gr.Markdown("### 5. Response Options")
-                stream_toggle = gr.Checkbox(label="Stream responses", value=True)
+                # Hidden state: streaming is enabled by default
+                stream_default = gr.State(True)
 
         # --- Event Listeners ---
         def apply_api_key(key: str):
@@ -71,7 +71,7 @@ def build_app() -> gr.Blocks:
 
         user_input.submit(
             fn=chat_entry,
-            inputs=[user_input, chatbot, task_select, tool_select, stream_toggle],
+            inputs=[user_input, chatbot, task_select, tool_select, stream_default],
             outputs=[user_input, chatbot],
         )
 
