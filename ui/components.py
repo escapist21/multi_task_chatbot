@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import gradio as gr
 
-from config.settings import TASK_CONFIG
+from config.settings import TASK_CONFIG, set_openai_api_key
 from core.assistant import chat_entry
 from core.file_handler import upload_files
 from core.state import reset_session
@@ -22,6 +22,16 @@ def build_app() -> gr.Blocks:
 
             # --- Right Column (Controls) ---
             with gr.Column(scale=1):
+                gr.Markdown("### 0. API Key")
+                with gr.Column():
+                    api_key_box = gr.Textbox(
+                        label="OpenAI API Key",
+                        placeholder="sk-...",
+                        type="password",
+                    )
+                    set_key_btn = gr.Button("Set API Key")
+                    api_key_status = gr.Textbox(label="API Key Status", interactive=False)
+
                 gr.Markdown("### 1. Configure Task")
                 task_select = gr.Radio(
                     choices=list(TASK_CONFIG.keys()),
@@ -52,6 +62,11 @@ def build_app() -> gr.Blocks:
                 stream_toggle = gr.Checkbox(label="Stream responses", value=True)
 
         # --- Event Listeners ---
+        def apply_api_key(key: str):
+            msg = set_openai_api_key(key)
+            reset_msg = reset_session()
+            return msg, reset_msg
+
         user_input.submit(
             fn=chat_entry,
             inputs=[user_input, chatbot, task_select, tool_select, stream_toggle],
@@ -68,6 +83,8 @@ def build_app() -> gr.Blocks:
         task_select.change(fn=reset_session, inputs=None, outputs=[reset_status])
         tool_select.change(fn=reset_session, inputs=None, outputs=[reset_status])
         reset_btn.click(fn=reset_session, inputs=None, outputs=[reset_status])
+
+        set_key_btn.click(fn=apply_api_key, inputs=[api_key_box], outputs=[api_key_status, reset_status])
 
     # Enable queuing so generator outputs stream incrementally in the UI
     demo.queue()

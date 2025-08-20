@@ -4,7 +4,7 @@ from typing import Any, Iterator, List, Tuple
 
 from openai.types.beta.assistant_create_params import ToolResources
 
-from config.settings import client, TASK_CONFIG, DEBUG, dprint
+import config.settings as settings
 from config.prompts import SYS_PROMPTS
 from core import state
 from core.responses_chat import responses_stream_chat
@@ -20,11 +20,19 @@ from utils.chat_format import (
 
 def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_messages: List[dict], message: str) -> tuple[bool, List[dict]]:
     """Ensure assistant and thread exist. Returns (ok, messages)."""
+    # Guard: require OpenAI client
+    if settings.client is None:
+        msgs = messages_append_user(list(history_messages or []), message)
+        msgs = messages_append_assistant(
+            msgs,
+            "Error: OpenAI API key is not set. Please enter your key under '0. API Key' and click 'Set API Key'.",
+        )
+        return False, msgs
     # --- 1. Create or Update Assistant ---
     if not state.assistant_id:
-        dprint("No assistant found. Creating a new one...")
+        settings.dprint("No assistant found. Creating a new one...")
         instructions = SYS_PROMPTS.get(task, "You are a helpful assistant.")
-        cfg = TASK_CONFIG.get(task, {"model": "gpt-4o-mini"})
+        cfg = settings.TASK_CONFIG.get(task, {"model": "gpt-4o-mini"})
 
         assistant_tools: List[dict[str, Any]] = []
         if "Web Search" in enabled_tools:
@@ -40,7 +48,7 @@ def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_me
                 print("Warning: File Search is enabled, but no files have been uploaded.")
 
         try:
-            assistant = client.beta.assistants.create(
+            assistant = settings.client.beta.assistants.create(
                 name="Multi-Task Chatbot",
                 instructions=instructions,
                 tools=assistant_tools,
@@ -48,7 +56,7 @@ def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_me
                 tool_resources=tool_resources,
             )
             state.assistant_id = assistant.id
-            dprint(
+            settings.dprint(
                 f"Created new Assistant (ID: {state.assistant_id}) for task '{task}' with tools: {enabled_tools}"
             )
         except Exception as e:
@@ -59,11 +67,11 @@ def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_me
 
     # --- 2. Create a Thread ---
     if not state.thread_id:
-        dprint("No thread found. Creating a new one...")
+        settings.dprint("No thread found. Creating a new one...")
         try:
-            thread = client.beta.threads.create()
+            thread = settings.client.beta.threads.create()
             state.thread_id = thread.id
-            dprint(f"Created new Thread (ID: {state.thread_id})")
+            settings.dprint(f"Created new Thread (ID: {state.thread_id})")
         except Exception as e:
             print(f"Error creating thread: {e}")
             msgs = messages_append_user(list(history_messages or []), message)
@@ -81,7 +89,7 @@ def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools
 
     # --- 3. Add User's Message to the Thread ---
     try:
-        client.beta.threads.messages.create(
+        settings.client.beta.threads.messages.create(
             thread_id=state.thread_id,
             role="user",
             content=message,
@@ -94,8 +102,8 @@ def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools
 
     # --- 4. Run the Assistant and Poll for Completion ---
     try:
-        dprint(f"Running Assistant {state.assistant_id} on Thread {state.thread_id}...")
-        run = client.beta.threads.runs.create_and_poll(
+        settings.dprint(f"Running Assistant {state.assistant_id} on Thread {state.thread_id}...")
+        run = settings.client.beta.threads.runs.create_and_poll(
             thread_id=state.thread_id,
             assistant_id=state.assistant_id,
         )
@@ -110,7 +118,7 @@ def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools
         msgs_list = list(history_messages or [])
         msgs_list = messages_append_user(msgs_list, message)
         try:
-            thread_messages = client.beta.threads.messages.list(thread_id=state.thread_id)
+            thread_messages = settings.client.beta.threads.messages.list(thread_id=state.thread_id)
             latest = thread_messages.data[0]
             final_reply = extract_text_blocks_from_assistant(latest)
             msgs_list = messages_append_assistant(msgs_list, final_reply)
@@ -119,7 +127,7 @@ def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools
             msgs_list = messages_append_assistant(msgs_list, "")
         return "", msgs_list
     else:
-        dprint(f"Run failed with status: {run.status}")
+        settings.dprint(f"Run failed with status: {run.status}")
         error_message = f"Run failed with status: {run.status}. Please try again."
         if getattr(run, "last_error", None):
             error_message += f" Details: {run.last_error.message}"
@@ -160,7 +168,7 @@ def chat_fn_streaming(
 
     # True token-by-token streaming via Assistants API
     try:
-        dprint(f"Streaming Assistant {state.assistant_id} on Thread {state.thread_id}...")
+        settings.dprint(f"Streaming Assistant {state.assistant_id} on Thread {state.thread_id}...")
         # Emit an immediate placeholder so the UI shows progress
         try:
             # Emit placeholder assistant if empty
@@ -172,21 +180,21 @@ def chat_fn_streaming(
         except Exception:
             pass
 
-        with client.beta.threads.runs.stream(
+        with settings.client.beta.threads.runs.stream(
             thread_id=state.thread_id, assistant_id=state.assistant_id
         ) as stream:
             for event in stream:
                 # Some SDKs expose `event.event` instead of `event.type`
                 etype = getattr(event, "type", None) or getattr(event, "event", None)
                 try:
-                    dprint(f"[assist_stream] event: {etype}")
+                    settings.dprint(f"[assist_stream] event: {etype}")
                     if etype is None:
-                        dprint(f"[assist_stream] event class: {event.__class__.__name__}")
+                        settings.dprint(f"[assist_stream] event class: {event.__class__.__name__}")
                         # Print a shortened repr to avoid flooding
                         er = repr(event)
                         if len(er) > 300:
                             er = er[:300] + "..."
-                        dprint(f"[assist_stream] event repr: {er}")
+                        settings.dprint(f"[assist_stream] event repr: {er}")
                 except Exception:
                     pass
 
@@ -267,13 +275,13 @@ def chat_fn_streaming(
     if run.status == "completed":
         # Ensure final text is complete (in case some tokens weren't emitted as deltas)
         try:
-            thread_messages = client.beta.threads.messages.list(thread_id=state.thread_id)
+            thread_messages = settings.client.beta.threads.messages.list(thread_id=state.thread_id)
             assistant_message = thread_messages.data[0]
             final_reply = extract_text_blocks_from_assistant(assistant_message)
             # Replace last assistant content with final
             work_messages[-1]["content"] = final_reply
         except Exception as e:
-            dprint(f"Error fetching final message after stream: {e}")
+            settings.dprint(f"Error fetching final message after stream: {e}")
         yield "", work_messages
     else:
         err = f"Run failed with status: {run.status}."

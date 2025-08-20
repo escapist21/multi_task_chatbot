@@ -1,5 +1,4 @@
 import os
-from getpass import getpass
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -17,24 +16,16 @@ def dprint(msg: str) -> None:
             pass
 
 # Initialise OpenAI client
-# Make sure your OPENAI_API_KEY is set in your .env file or environment variables
+# Prefer .env or environment variable; UI can set at runtime.
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    dprint("OPENAI_API_KEY not found in environment; prompting via getpass.")
-    try:
-        OPENAI_API_KEY = getpass("Enter your OPENAI_API_KEY (input hidden): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        OPENAI_API_KEY = None
-    if not OPENAI_API_KEY:
-        raise ValueError(
-            "OPENAI_API_KEY is required. Set it in your .env, environment, or enter when prompted."
-        )
-
-# Ensure the key is available to other modules in this process
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-dprint("OPENAI_API_KEY set in process environment.")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
+if OPENAI_API_KEY:
+    # Ensure the key is available to other modules in this process
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+    dprint("OPENAI_API_KEY loaded from environment.")
+    client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    dprint("OPENAI_API_KEY not set at startup; waiting for UI input or .env.")
+    client = None
 
 # Define task configurations with model, temperature, etc.
 TASK_CONFIG = {
@@ -46,3 +37,22 @@ TASK_CONFIG = {
     "Table Question Answering": {"model": "gpt-4.1", "temperature": 0.0},
     "Sentence Similarity": {"model": "gpt-4.1-mini", "temperature": 0.0},
 }
+
+
+def set_openai_api_key(new_key: str) -> str:
+    """Update the OpenAI API key at runtime and reinitialize the client.
+
+    Returns a short status message suitable for UI display.
+    """
+    global OPENAI_API_KEY, client
+    try:
+        key = (new_key or "").strip()
+        if not key:
+            return "Error: API key cannot be empty."
+        os.environ["OPENAI_API_KEY"] = key
+        OPENAI_API_KEY = key
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        dprint("OPENAI_API_KEY updated at runtime.")
+        return "API key updated. Session has been reset."
+    except Exception as e:
+        return f"Error updating API key: {e}"
