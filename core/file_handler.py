@@ -31,6 +31,13 @@ def upload_files(files: List[os.PathLike | str] | None) -> Tuple[str, Any, Any]:
         )
 
     try:
+        # Guard: OpenAI client must be initialized
+        if client is None:
+            return (
+                "Error: OpenAI API key is not set. Please enter your key under '0. API Key' and click 'Set API Key'.",
+                gr.update(),
+                gr.update(),
+            )
         # Create a vector store
         vs = client.vector_stores.create(name=f"chatbot_store_{int(time.time())}")
         state.vector_store_id = vs.id
