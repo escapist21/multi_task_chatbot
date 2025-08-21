@@ -6,14 +6,11 @@ services:
     container_name: multi-task-chatbot
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
       - PORT=7860
       - SERVER_NAME=0.0.0.0
       - DEBUG=${DEBUG-0}
       - GRADIO_SHARE=0
-    secrets:
-      - tavily_api_key
-    command: >
-      sh -c "export TAVILY_API_KEY=\"$(cat /run/secrets/tavily_api_key)\" && python serve.py"
     networks:
       - frontend
     labels:
