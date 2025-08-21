@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterator, List, Tuple
+import json
 
 from openai.types.beta.assistant_create_params import ToolResources
 
@@ -36,7 +37,33 @@ def _ensure_assistant_and_thread(task: str, enabled_tools: List[str], history_me
 
         assistant_tools: List[dict[str, Any]] = []
         if "Web Search" in enabled_tools:
-            assistant_tools.append({"type": "search"})
+            # Register a function tool for web search; the model can request it when needed
+            assistant_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web for up-to-date information and return a brief, source-linked summary.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query to look up on the web.",
+                                },
+                                "max_results": {
+                                    "type": "integer",
+                                    "description": "Maximum number of results to include (1-10).",
+                                    "minimum": 1,
+                                    "maximum": 10,
+                                    "default": 5,
+                                },
+                            },
+                            "required": ["query"],
+                        },
+                    },
+                }
+            )
 
         # Initialize tool_resources as None, with the correct type hint
         tool_resources: ToolResources | None = None
@@ -103,10 +130,61 @@ def chat_fn(message: str, history_messages: List[dict], task: str, enabled_tools
     # --- 4. Run the Assistant and Poll for Completion ---
     try:
         settings.dprint(f"Running Assistant {state.assistant_id} on Thread {state.thread_id}...")
-        run = settings.client.beta.threads.runs.create_and_poll(
+        run = settings.client.beta.threads.runs.create(
             thread_id=state.thread_id,
             assistant_id=state.assistant_id,
         )
+
+        # Handle function tool-calls loop
+        while True:
+            status = getattr(run, "status", None)
+            if status == "completed":
+                break
+            if status == "requires_action":
+                try:
+                    tool_calls = run.required_action.submit_tool_outputs.tool_calls  # type: ignore[attr-defined]
+                except Exception:
+                    tool_calls = []
+
+                tool_outputs: List[dict[str, str]] = []
+                for call in tool_calls:
+                    try:
+                        fname = getattr(call, "function", None).name  # type: ignore[union-attr]
+                        fargs_json = getattr(call, "function", None).arguments  # type: ignore[union-attr]
+                    except Exception:
+                        fname = None
+                        fargs_json = None
+                    if fname == "web_search":
+                        try:
+                            args = json.loads(fargs_json or "{}")
+                        except Exception:
+                            args = {}
+                        query = args.get("query", "")
+                        max_results = args.get("max_results", 5)
+                        # Execute Tavily search
+                        try:
+                            from utils.web_search import tavily_search_summarize
+
+                            output_text = tavily_search_summarize(query=query, max_results=max_results)
+                        except Exception as err:
+                            output_text = f"Error performing web search: {err}"
+                        tool_outputs.append({
+                            "tool_call_id": call.id,
+                            "output": output_text,
+                        })
+                # Submit tool outputs and poll until next state
+                if tool_outputs:
+                    run = settings.client.beta.threads.runs.submit_tool_outputs_and_poll(
+                        thread_id=state.thread_id,
+                        run_id=run.id,
+                        tool_outputs=tool_outputs,
+                    )
+                    continue
+            # Fallback: poll until completion or next action required
+            run = settings.client.beta.threads.runs.retrieve(
+                thread_id=state.thread_id,
+                run_id=run.id,
+            )
     except Exception as e:
         print(f"Error during assistant run: {e}")
         msgs = messages_append_user(list(history_messages or []), message)
@@ -312,10 +390,14 @@ def chat_entry(
         # If no tools are enabled, use the simpler Responses API streaming path
         if not enabled_tools:
             for _, out_messages in responses_stream_chat(message, history_messages, task):
-                # Already messages for Chatbot(type="messages")
                 yield "", out_messages
             return
-        # Otherwise, use Assistants streaming (supports tools), messages-based
+        # If Web Search is enabled, fall back to non-streaming (function tool requires action loop)
+        if "Web Search" in enabled_tools:
+            _, out_messages = chat_fn(message, history_messages, task, enabled_tools)
+            yield "", out_messages
+            return
+        # Otherwise, use Assistants streaming (supports file_search), messages-based
         for _, out_messages in chat_fn_streaming(message, history_messages, task, enabled_tools):
             yield "", out_messages
         return
