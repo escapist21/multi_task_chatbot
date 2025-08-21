@@ -30,7 +30,7 @@ def build_app() -> gr.Blocks:
 
         with gr.Row():
             # --- Left Column (Chat Interface) ---
-            with gr.Column(scale=3):
+            with gr.Column(scale=4):
                 chatbot = gr.Chatbot(
                     label="Conversation",
                     height=600,
@@ -47,7 +47,7 @@ def build_app() -> gr.Blocks:
                 )
 
             # --- Controls Left: API Key + Configure Task ---
-            with gr.Column(scale=1, min_width=320):
+            with gr.Column(scale=1, min_width=280):
                 gr.Markdown("### 0. API Key")
                 with gr.Column():
                     api_key_box = gr.Textbox(
@@ -69,7 +69,7 @@ def build_app() -> gr.Blocks:
                 )
 
             # --- Controls Right: Tools + Upload + Session ---
-            with gr.Column(scale=1, min_width=320):
+            with gr.Column(scale=1, min_width=280):
                 gr.Markdown("### 2. Enable Tools")
                 tool_select = gr.CheckboxGroup(
                     choices=["Web Search", "File Search"],
