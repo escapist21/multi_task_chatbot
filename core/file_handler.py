@@ -5,7 +5,7 @@ from typing import List, Tuple, Any
 
 import gradio as gr
 
-from config.settings import client
+import config.settings as settings
 from core.state import reset_session
 import os
 from pathlib import Path
@@ -31,15 +31,15 @@ def upload_files(files: List[os.PathLike | str] | None) -> Tuple[str, Any, Any]:
         )
 
     try:
-        # Guard: OpenAI client must be initialized
-        if client is None:
+        # Guard: OpenAI client must be initialized (check dynamically)
+        if settings.client is None:
             return (
                 "Error: OpenAI API key is not set. Please enter your key under '0. API Key' and click 'Set API Key'.",
                 gr.update(),
                 gr.update(),
             )
         # Create a vector store
-        vs = client.vector_stores.create(name=f"chatbot_store_{int(time.time())}")
+        vs = settings.client.vector_stores.create(name=f"chatbot_store_{int(time.time())}")
         state.vector_store_id = vs.id
 
         # Normalize incoming paths from Gradio (may be str or PathLike objects)
@@ -74,7 +74,7 @@ def upload_files(files: List[os.PathLike | str] | None) -> Tuple[str, Any, Any]:
             )
 
             # Upload and poll
-            file_batch = client.vector_stores.file_batches.upload_and_poll(
+            file_batch = settings.client.vector_stores.file_batches.upload_and_poll(
                 vector_store_id=state.vector_store_id, files=file_streams
             )
         finally:
